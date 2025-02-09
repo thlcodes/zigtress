@@ -57,4 +57,6 @@ test "system" {
     try testing.expect(system.registry.count() == 1);
 
     _ = try system.send(TestActor.T, ref, .{ .add = 1 });
+    const ret = try system.send(TestActor.T, ref, .{ .get = undefined }) orelse @panic("woops");
+    try testing.expectEqual(ret.status, 1);
 }
