@@ -1,0 +1,13 @@
+.{
+    .name = "examples",
+
+    .version = "0.0.1",
+
+    .dependencies = .{ .zigtress = .{ .path = "../" } },
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "simple",
+    },
+}
