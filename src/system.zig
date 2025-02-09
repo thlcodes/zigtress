@@ -33,12 +33,10 @@ pub fn spawn(self: *System, actor: *anyopaque) !Ref {
     return Ref{ .id = id };
 }
 
-pub fn send(self: *System, comptime T: type, ref: Ref, msg: T) !?T {
+pub fn send(self: *System, ref: Ref, comptime T: type, msg: T) !?T {
     const ptr = self.registry.get(ref.id) orelse return Error.ActorNotFound;
-    // const T = @TypeOf(msg);
-    const actorPtr: *Actor(T) = @ptrCast(@alignCast(ptr));
-    // var actor = actorPtr.*;
-    return try actorPtr.handle(msg);
+    const actor: *Actor(T) = @ptrCast(@alignCast(ptr));
+    return try actor.handle(msg);
 }
 
 // tests
@@ -56,7 +54,7 @@ test "system" {
     try testing.expect(ref.id == 0);
     try testing.expect(system.registry.count() == 1);
 
-    _ = try system.send(TestActor.T, ref, .{ .add = 1 });
-    const ret = try system.send(TestActor.T, ref, .{ .get = undefined }) orelse @panic("woops");
+    _ = try system.send(ref, TestActor.T, .{ .add = 1 });
+    const ret = try system.send(ref, TestActor.T, .{ .get = undefined }) orelse @panic("woops");
     try testing.expectEqual(ret.status, 1);
 }
