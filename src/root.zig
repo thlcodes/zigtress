@@ -3,7 +3,6 @@
 //! start with main.zig instead.
 const std = @import("std");
 
-const system = @import("system.zig");
 const actor = @import("actor.zig");
 
 // tests
@@ -11,6 +10,5 @@ const actor = @import("actor.zig");
 const testing = std.testing;
 
 test {
-    testing.refAllDecls(system);
     testing.refAllDecls(actor);
 }
