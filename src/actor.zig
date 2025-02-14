@@ -51,12 +51,12 @@ pub fn Actor(comptime S: type, comptime T: type) type {
                 }
 
                 if (!self.running) {
-                    std.debug.print("loop:running = false", .{});
+                    std.debug.print("loop:running = false\n", .{});
                     break;
                 }
 
                 const msg = self.channel.popOrNull();
-                std.debug.print("loop:popped {?}\n", .{msg});
+                std.debug.print("loop:popped {?any}\n", .{msg});
 
                 if (msg == null) {
                     std.debug.print("loop:msg is null, waiting for cond\n", .{});
@@ -94,21 +94,29 @@ pub fn Actor(comptime S: type, comptime T: type) type {
 const testing = std.testing;
 
 test "actor" {
-    var state: i32 = 0;
+    var buffer: [1024]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    var state = std.ArrayList(u8).init(fba.allocator());
+    defer state.deinit();
     const H = struct {
-        fn handle(s: *i32, msg: i32) !void {
-            s.* += msg;
+        fn handle(s: *std.ArrayList(u8), msg: []const u8) !void {
+            s.appendSlice(msg) catch @panic("woops");
         }
     };
-    var actor = Actor(i32, i32).init(testing.allocator, &state, H.handle);
+    var actor = Actor(std.ArrayList(u8), []const u8).init(testing.allocator, &state, H.handle);
     defer actor.deinit();
     try actor.run();
     std.Thread.sleep(0.5 * std.time.ns_per_s);
-    try actor.send(1);
-    try actor.send(1);
+    try actor.send("Hi ");
+    try actor.send("t");
+    try actor.send("h");
+    try actor.send("e");
+    try actor.send("r");
+    try actor.send("e");
+    try actor.send(" ");
     std.Thread.sleep(0.5 * std.time.ns_per_s);
-    try actor.send(1);
+    try actor.send("Peter");
     std.Thread.sleep(0.5 * std.time.ns_per_s);
     actor.stop();
-    try testing.expectEqual(state, 3);
+    try testing.expectEqualStrings(state.items, "Hi there Peter");
 }
