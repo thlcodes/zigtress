@@ -10,5 +10,6 @@ const actor = @import("actor.zig");
 const testing = std.testing;
 
 test {
-    testing.refAllDecls(actor);
+    testing.refAllDecls(@import("actor.zig"));
+    testing.refAllDecls(@import("channel.zig"));
 }
