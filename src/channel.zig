@@ -37,20 +37,16 @@ pub fn Channel(comptime T: type, comptime size: usize) type {
             self.writer.store(newWriter, .seq_cst);
         }
 
-        pub fn pop(self: *Self) !T {
+        pub fn pop(self: *Self) ?T {
             const reader = self.reader.load(.seq_cst);
             const writer = self.writer.load(.seq_cst);
 
-            if (reader >= writer) return ChannelError.Empty;
+            if (reader >= writer) return null;
 
             const newReader = reader + 1;
 
             self.reader.store(newReader, .seq_cst);
             return self.data[reader % size];
-        }
-
-        pub fn popOrNull(self: *Self) ?T {
-            return self.pop() catch return null;
         }
 
         pub fn count(self: *Self) usize {
@@ -71,7 +67,7 @@ test "channel" {
         defer channel.deinit();
 
         // initially empty
-        try testing.expectError(ChannelError.Empty, channel.pop());
+        try testing.expectEqual(null, channel.pop());
 
         // push till full
         for (0..10) |i| {
@@ -86,11 +82,10 @@ test "channel" {
         // read till empty
         for (0..10) |i| {
             const res = channel.pop();
-            std.debug.print("{} {any}\n", .{ i, res });
             if (i < 10) {
-                try testing.expectEqual(@as(i32, @intCast(i)), try res);
+                try testing.expectEqual(@as(i32, @intCast(i)), res.?);
             } else {
-                try testing.expectError(ChannelError.Empty, res);
+                try testing.expectEqual(null, res);
                 break;
             }
         }
@@ -98,7 +93,7 @@ test "channel" {
         // push and pop
         for (0..100) |i| {
             try channel.push(@intCast(i));
-            try testing.expectEqual(@as(i32, @intCast(i)), try channel.pop());
+            try testing.expectEqual(@as(i32, @intCast(i)), channel.pop().?);
         }
     }
 
@@ -112,10 +107,8 @@ test "channel" {
                     while (if (ch.push(@intCast(i))) |_| false else |_| true) {
                         std.Thread.sleep(1 * std.time.ns_per_us);
                     }
-                    std.debug.print(" wrote: {}, count: {}\n", .{ i, ch.count() });
                     std.Thread.sleep(1 * std.time.ns_per_us);
                 }
-                std.debug.print("byte ...", .{});
             }
         };
         const t = try std.Thread.spawn(.{}, H.h, .{&channel});
@@ -124,13 +117,11 @@ test "channel" {
 
         var check: i32 = @intCast(0);
         while (true) {
-            if (channel.popOrNull()) |i| {
-                std.debug.print("get: {}\n", .{i});
+            if (channel.pop()) |i| {
                 try testing.expectEqual(i, check);
                 check += 1;
                 if (i == 999) break;
             } else {
-                std.debug.print("empty, waiting ...\n", .{});
                 std.Thread.sleep(1 * std.time.ns_per_ms);
             }
         }

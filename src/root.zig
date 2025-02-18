@@ -3,7 +3,7 @@
 //! start with main.zig instead.
 const std = @import("std");
 
-const actor = @import("actor.zig");
+pub const actor = @import("actor.zig");
 
 // tests
 

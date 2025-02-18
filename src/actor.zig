@@ -1,5 +1,8 @@
 const std = @import("std");
 
+const channel = @import("channel.zig");
+const Channel = channel.Channel;
+
 fn HandleFn(comptime S: type, comptime T: type) type {
     return *const fn (s: *S, msg: T) anyerror!void;
 }
@@ -11,25 +14,23 @@ pub fn Actor(comptime S: type, comptime T: type) type {
         state: *S,
         handle: HandleFn(S, T),
 
-        channel: std.ArrayList(T),
+        channel: Channel(T, 128),
         thread: ?std.Thread = null,
-        mutex: std.Thread.Mutex,
-        cond: std.Thread.Condition,
 
-        running: bool = false,
+        running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+        semaphore: std.Thread.Semaphore = std.Thread.Semaphore{},
 
-        pub fn init(alloc: std.mem.Allocator, initial: *S, handle: HandleFn(S, T)) @This() {
+        pub fn init(alloc: std.mem.Allocator, initial: *S, handle: HandleFn(S, T)) !@This() {
             return .{
                 .alloc = alloc,
                 .state = initial,
                 .handle = handle,
-                .channel = std.ArrayList(T).init(alloc),
-                .mutex = std.Thread.Mutex{},
-                .cond = std.Thread.Condition{},
+                .channel = try Channel(T, 128).init(alloc),
             };
         }
 
         pub fn run(self: *@This()) !void {
+            self.running.store(true, .seq_cst);
             self.thread = try std.Thread.spawn(.{}, loop, .{self});
         }
 
@@ -40,33 +41,15 @@ pub fn Actor(comptime S: type, comptime T: type) type {
         }
 
         fn loop(self: *@This()) void {
-            self.running = true;
-            while (true) {
-                std.debug.print("loop:lock\n", .{});
-                self.mutex.lock();
-
-                defer {
-                    std.debug.print("loop:unlock\n", .{});
-                    self.mutex.unlock();
+            var firstRun: bool = true;
+            while (firstRun or self.running.load(.seq_cst)) {
+                firstRun = false;
+                if (self.channel.pop()) |msg| {
+                    // TODO: define how to check errors here
+                    self.handle(self.state, msg) catch @panic("woops");
+                } else {
+                    self.semaphore.wait();
                 }
-
-                if (!self.running) {
-                    std.debug.print("loop:running = false\n", .{});
-                    break;
-                }
-
-                const msg = self.channel.popOrNull();
-                std.debug.print("loop:popped {?any}\n", .{msg});
-
-                if (msg == null) {
-                    std.debug.print("loop:msg is null, waiting for cond\n", .{});
-                    self.cond.wait(&self.mutex);
-                    std.debug.print("loop:cond signalled\n", .{});
-                    continue;
-                }
-
-                std.debug.print("sending msg ...\n", .{});
-                self.handle(self.state, msg orelse unreachable) catch @panic("woops");
             }
         }
 
@@ -75,18 +58,14 @@ pub fn Actor(comptime S: type, comptime T: type) type {
         }
 
         pub fn send(self: *@This(), msg: T) !void {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            try self.channel.insert(0, msg);
-            self.cond.signal();
+            try self.channel.push(msg);
+            self.semaphore.post();
         }
 
         pub fn stop(self: *@This()) void {
             defer self.wait();
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            self.running = false;
-            self.cond.signal();
+            self.running.store(false, .seq_cst);
+            self.semaphore.post();
         }
     };
 }
@@ -103,20 +82,26 @@ test "actor" {
             s.appendSlice(msg) catch @panic("woops");
         }
     };
-    var actor = Actor(std.ArrayList(u8), []const u8).init(testing.allocator, &state, H.handle);
+    var actor = try Actor(std.ArrayList(u8), []const u8).init(testing.allocator, &state, H.handle);
     defer actor.deinit();
     try actor.run();
-    std.Thread.sleep(0.5 * std.time.ns_per_s);
+    std.Thread.sleep(0.1 * std.time.ns_per_s);
     try actor.send("Hi ");
     try actor.send("t");
-    try actor.send("h");
-    try actor.send("e");
+    const run2 = struct {
+        fn run(act: *Actor(std.ArrayList(u8), []const u8)) void {
+            act.send("h") catch unreachable;
+            act.send("e") catch unreachable;
+        }
+    }.run;
+    var t2 = try std.Thread.spawn(.{}, run2, .{&actor});
+    t2.join();
     try actor.send("r");
     try actor.send("e");
     try actor.send(" ");
-    std.Thread.sleep(0.5 * std.time.ns_per_s);
+    std.Thread.sleep(0.1 * std.time.ns_per_s);
     try actor.send("Peter");
-    std.Thread.sleep(0.5 * std.time.ns_per_s);
+    std.Thread.sleep(0.1 * std.time.ns_per_s);
     actor.stop();
     try testing.expectEqualStrings(state.items, "Hi there Peter");
 }
